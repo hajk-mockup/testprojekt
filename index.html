@@ -1,0 +1,136 @@
+<!-- OpenLayers Example from FME Server Developer Playground -->
+<!DOCTYPE html>
+<html>
+<head>
+	<title>OpenLayers Example from FME Server Developer Playground</title>
+	<!-- Styles for example -->
+	<link rel="stylesheet" href="src/css/style.css" type="text/css" />
+	<!-- Include FMEServer.js -->
+	<script type="text/javascript" src="libs/FMEServer.js"></script>
+	<!--
+	<script type="text/javascript" src="http://api.fmeserver.com/js/v1.1/FMEServer.js"></script>
+	-->
+	<!-- The following are Required for OpenLayers -->
+	<script type="text/javascript" src="http://openlayers.org/api/OpenLayers.js"></script>
+</head>
+<body>
+	<h4>This example clips Vancouver transit data to a user drawn polygon.</h4>
+	<form id="exampleForm">
+		<label><b>Step 1</b> - Draw the Polygon (Double Click to Close): </label>
+		<input id="draw" type="button" value="Draw" />
+		<input id="reset" type="button" value="Reset" /><br />
+		<div id="mapDiv"></div>
+		<label><b>Step 2</b> - Submit the Request to FME Server: </label>
+		<input type="button" onclick="processClip();" value="Clip Data To Area" />
+	</form>
+	<script type="text/javascript">
+		var drawControl, mouseControl, polygonLayer, map;
+		var fromProjection, toProjection;
+		var clippingGeometry = [];
+
+		window.onload = function() {
+			map = new OpenLayers.Map( "mapDiv" );
+			var mapnik = new OpenLayers.Layer.OSM();
+			fromProjection = new OpenLayers.Projection( "EPSG:4326" );   // Transform from WGS 1984
+	    	toProjection = new OpenLayers.Projection( "EPSG:900913" ); // to Spherical Mercator Projection
+			var position = new OpenLayers.LonLat( -123.114166, 49.264549 ).transform( fromProjection, toProjection );
+			var zoom = 12;
+
+			map.addLayer( mapnik );
+			map.setCenter( position, zoom );
+
+			document.getElementById( "draw" ).setAttribute( "onclick", "drawPolygon();" );
+			document.getElementById( "reset" ).setAttribute( "onclick", "drawReset();" );
+
+			FMEServer.init({
+				server : "https://demos-safe-software.fmecloud.com",
+				token : "568c604bc1f235bbe137c514e7c61a8436043070"
+			});
+		};
+
+		function drawPolygon() {
+			drawReset();
+
+			polygonLayer = new OpenLayers.Layer.Vector( "Polygon Layer" );
+			mouseControl = new OpenLayers.Control.MousePosition();
+
+			map.addLayer( polygonLayer );
+			map.addControl( mouseControl );
+
+			drawControl = new OpenLayers.Control.DrawFeature( polygonLayer,
+				OpenLayers.Handler.Polygon );
+			map.addControl( drawControl );
+			drawControl.activate();
+		}
+
+		function drawReset() {
+			if( drawControl ) {
+				map.removeLayer( polygonLayer );
+				polygonLayer = null;
+				mouseControl.deactivate();
+				mouseControl = null;
+				drawControl.deactivate();
+				drawControl = null;
+				clippingGeometry = [];
+			}
+		}
+
+		function extractShape() {
+			if( polygonLayer.features[0] ) {
+				var vertices = polygonLayer.features[0].geometry.getVertices();
+				for( var i = 0; i < vertices.length; i++ ) {
+					var point = vertices[i].transform( toProjection, fromProjection );
+					clippingGeometry.push( [ point.x, point.y ] );
+				}
+				clippingGeometry.push( clippingGeometry[0] );
+				return true;
+			}
+			return false;
+		}
+
+		function showResults( json ) {
+			// The following is to write out the full return object
+			// for visualization of the example
+			var hr = document.createElement( "hr" );
+			var div = document.createElement( "div" );
+			
+			// This extracts the download link to the clipped data
+			var download = json.serviceResponse.url;
+
+			div.innerHTML = "<h4>Return Object:</h4><pre>"+JSON.stringify(json, undefined, 4)+"</pre>";
+			div.innerHTML += "<hr><a href=\""+download+"\">Download Result</a>";
+			document.body.appendChild( hr );
+			document.body.appendChild( div );
+		}
+
+		function processClip() {
+			var repository = "REST-Playground";
+			var workspace = "WKTClip.fmw";
+
+			if( extractShape() ) {
+
+				// Process the clippingGeometry into a WKT Polygon string
+				var geometry = "POLYGON((";
+
+				for( var i = 0; i < clippingGeometry.length; i++ ) {
+					var lat = clippingGeometry[i][1];
+					var lng = clippingGeometry[i][0];
+					geometry += lng+" "+lat+",";
+				}
+
+				// Remove trailing , from string
+				geometry = geometry.substr( 0, geometry.length - 1 );
+				geometry += "))";
+				
+				// Set the parameters for the Data Download Service (ESRI Shapefile Format)
+				// FORMAT OPTIONS: ACAD, SHAPE, GML, OGCKML
+				var params = "GEOM="+geometry+"&FORMAT=SHAPE";
+
+				// Use the FME Server Data Download Service
+				FMEServer.runDataDownload( repository, workspace, params, showResults );
+			}
+		}
+
+	</script>
+</body>
+</html>
